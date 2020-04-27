@@ -56,6 +56,7 @@ import org.jmrtd.lds.ChipAuthenticationPublicKeyInfo;
 import org.jmrtd.lds.SODFile;
 import org.jmrtd.lds.SecurityInfo;
 import org.jmrtd.lds.icao.DG14File;
+import org.jmrtd.lds.icao.DG15File;
 import org.jmrtd.lds.icao.DG1File;
 import org.jmrtd.lds.icao.DG2File;
 import org.jmrtd.lds.iso19794.FaceImageInfo;
@@ -70,6 +71,7 @@ import java.math.BigInteger;
 import java.security.KeyStore;
 import java.security.MessageDigest;
 import java.security.PublicKey;
+import java.security.SecureRandom;
 import java.security.Signature;
 import java.security.cert.CertPath;
 import java.security.cert.CertPathValidator;
@@ -338,11 +340,13 @@ public class MainActivity extends AppCompatActivity {
         private DG1File dg1File;
         private DG2File dg2File;
         private DG14File dg14File;
+        private DG15File dg15File;
         private SODFile sodFile;
         private String imageBase64;
         private Bitmap bitmap;
         private boolean chipAuthSucceeded = false;
         private boolean passiveAuthSuccess = false;
+        private boolean activeAuthSuccess = false;
 
         @Override
         protected Exception doInBackground(Void... params) {
@@ -413,6 +417,25 @@ public class MainActivity extends AppCompatActivity {
                     Log.w(TAG, e);
                 }
 
+                // Active Authentication using Data Group 15
+                byte[] dg15Encoded = new byte[0];
+                try {
+                    CardFileInputStream dg15In = service.getInputStream(PassportService.EF_DG15);
+                    dg15Encoded = IOUtils.toByteArray(dg15In);
+                    ByteArrayInputStream dg15InByte = new ByteArrayInputStream(dg15Encoded);
+                    dg15File = new DG15File(dg15InByte);
+
+                    PublicKey publicKey = dg15File.getPublicKey();
+                    SecureRandom random = new SecureRandom();
+                    byte[] challenge = new byte[20];
+                    random.nextBytes(challenge);
+                    service.doAA(publicKey, null, "SHA256withRSA", challenge);
+                    activeAuthSuccess = true;
+                }
+                catch (Exception e) {
+                    Log.w(TAG, e);
+                }
+
                 MessageDigest digest = MessageDigest.getInstance(sodFile.getDigestAlgorithm());
 
                 Map<Integer,byte[]> dataHashes = sodFile.getDataGroupHashes();
@@ -420,10 +443,13 @@ public class MainActivity extends AppCompatActivity {
                 byte[] dg14Hash = new byte[0];
                 if(chipAuthSucceeded)
                     dg14Hash = digest.digest(dg14Encoded);
+                byte[] dg15Hash = new byte[0];
+                if(activeAuthSuccess)
+                    dg15Hash = digest.digest(dg15Encoded);
                 byte[] dg1Hash = digest.digest(dg1File.getEncoded());
                 byte[] dg2Hash = digest.digest(dg2File.getEncoded());
 
-                if(Arrays.equals(dg1Hash, dataHashes.get(1)) && Arrays.equals(dg2Hash, dataHashes.get(2)) && (!chipAuthSucceeded || Arrays.equals(dg14Hash, dataHashes.get(14)))) {
+                if(Arrays.equals(dg1Hash, dataHashes.get(1)) && Arrays.equals(dg2Hash, dataHashes.get(2)) && (!chipAuthSucceeded || Arrays.equals(dg14Hash, dataHashes.get(14))) && (!activeAuthSuccess || Arrays.equals(dg15Hash, dataHashes.get(15)))) {
                     try {
                         // We retrieve the CSCA from the german master list
                         ASN1InputStream asn1InputStream = new ASN1InputStream(getAssets().open("masterList"));
@@ -529,6 +555,7 @@ public class MainActivity extends AppCompatActivity {
 
                 String passiveAuthStr = "";
                 String chipAuthStr = "";
+                String activeAuthStr = "";
                 if(passiveAuthSuccess)
                     passiveAuthStr = getString(R.string.yes);
                 else
@@ -537,8 +564,13 @@ public class MainActivity extends AppCompatActivity {
                     chipAuthStr = getString(R.string.yes);
                 else
                     chipAuthStr = getString(R.string.no);
+                if(activeAuthSuccess)
+                    activeAuthStr = getString(R.string.yes);
+                else
+                    activeAuthStr = getString(R.string.no);
                 intent.putExtra(ResultActivity.KEY_PASSIVE_AUTH, passiveAuthStr);
                 intent.putExtra(ResultActivity.KEY_CHIP_AUTH, chipAuthStr);
+                intent.putExtra(ResultActivity.KEY_ACTIVE_AUTH, activeAuthStr);
 
                 if (bitmap != null) {
                     if (encodePhotoToBase64) {
