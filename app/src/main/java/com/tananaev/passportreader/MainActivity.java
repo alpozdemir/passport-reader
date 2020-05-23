@@ -427,7 +427,7 @@ public class MainActivity extends AppCompatActivity {
 
                     PublicKey publicKey = dg15File.getPublicKey();
                     SecureRandom random = new SecureRandom();
-                    byte[] challenge = new byte[20];
+                    byte[] challenge = new byte[8];
                     random.nextBytes(challenge);
                     service.doAA(publicKey, null, "SHA256withRSA", challenge);
                     activeAuthSuccess = true;
